@@ -31,6 +31,11 @@ linux/flutter/generated_plugin_registrant.h
 .vscode/
 *.iml
 
-# OS
+# OS / Google Drive sync artifacts
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Local utility scripts (not for repo users)
+sync.bat
+Git_Instructions_for_Bud.txt
