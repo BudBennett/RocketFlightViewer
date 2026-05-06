@@ -16,7 +16,7 @@ Flight data viewer and configurator for the RocketPayload model rocket flight co
 | Variant | Stats | Full Data Download | Plots |
 |---|---|---|---|
 | STANDARD | Yes | Yes | Yes |
-| LITE | Yes | — | — |
+| PRO | Yes | Yes | Yes |
 
 ## Installation
 
