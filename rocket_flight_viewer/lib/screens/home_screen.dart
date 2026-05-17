@@ -139,7 +139,7 @@ class _FlightDataTabState extends State<_FlightDataTab> {
               alignment: Alignment.centerLeft,
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.save_alt, size: 16),
-                label: const Text('Save CSV'),
+                label: const Text('Save Flight Data'),
                 onPressed: () => ctrl.exportCsv(),
               ),
             ),

@@ -9,12 +9,16 @@ class FlightChart extends StatefulWidget {
   final FlightData data;
   final Bmp384Calib? calib;
   final bool useImperial;
+  final FlightData? data2;
+  final void Function(Color colorA, Color colorB)? onColorsChanged;
 
   const FlightChart({
     super.key,
     required this.data,
     this.calib,
     this.useImperial = true,
+    this.data2,
+    this.onColorsChanged,
   });
 
   @override
@@ -24,6 +28,14 @@ class FlightChart extends StatefulWidget {
 class _FlightChartState extends State<FlightChart>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
+
+  static const _altColorA   = Colors.blue;
+  static const _altColorB   = Colors.pinkAccent;
+  static const _accelColorA = Colors.orange;
+  static const _accelColorB = Colors.teal;
+
+  Color get _colorA => _tabs.index == 0 ? _altColorA   : _accelColorA;
+  Color get _colorB => _tabs.index == 0 ? _altColorB   : _accelColorB;
 
   // Zoom state — null means "use data range"
   double? _zoomMinX, _zoomMaxX;
@@ -37,6 +49,9 @@ class _FlightChartState extends State<FlightChart>
       _zoomMinX != null || _zoomMaxX != null ||
       _zoomMinY != null || _zoomMaxY != null;
 
+  bool get _isComparing =>
+      widget.data2 != null && !widget.data2!.isEmpty;
+
   void _resetZoom() => setState(() {
         _zoomMinX = _zoomMaxX = _zoomMinY = _zoomMaxY = null;
       });
@@ -46,8 +61,17 @@ class _FlightChartState extends State<FlightChart>
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
     _tabs.addListener(() {
-      if (!_tabs.indexIsChanging) _resetZoom();
+      if (!_tabs.indexIsChanging) {
+        _resetZoom();
+        widget.onColorsChanged?.call(_colorA, _colorB);
+      }
     });
+  }
+
+  @override
+  void didUpdateWidget(FlightChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.data2 != widget.data2) _resetZoom();
   }
 
   @override
@@ -73,7 +97,7 @@ class _FlightChartState extends State<FlightChart>
             ],
           ),
         ),
-        _buildSummaryRow(),
+        if (!_isComparing) _buildSummaryRow(),
       ],
     );
   }
@@ -86,29 +110,46 @@ class _FlightChartState extends State<FlightChart>
     final scale = widget.useImperial ? 3.28084 : 1.0;
     final unit  = widget.useImperial ? 'ft' : 'm';
 
-    List<FlSpot> spots;
+    List<FlSpot> spotsA;
     String label;
 
     if (samples.first.altitudeM != null) {
-      // CSV path: altitude already stored per-sample — no calib needed.
-      spots = samples.map((s) => FlSpot(s.timeSec, (s.altitudeM ?? 0) * scale)).toList();
+      spotsA = samples.map((s) => FlSpot(s.timeSec, (s.altitudeM ?? 0) * scale)).toList();
       label = 'Altitude above arm point ($unit)';
     } else if (calib != null) {
-      // Live download path: compute from calibration.
       final groundTLin = calib.tLin(widget.data.metadata.groundRawTemp != 0
           ? widget.data.metadata.groundRawTemp
           : samples.first.rawTemp);
       final groundPa  = calib.pressurePa(widget.data.groundRawPress, groundTLin);
       final groundAltM = Bmp384Calib.altitudeM(groundPa);
-      spots = samples.map((s) {
+      spotsA = samples.map((s) {
         final pa = calib.pressurePa(s.rawPress, calib.tLin(s.rawTemp));
         return FlSpot(s.timeSec, (Bmp384Calib.altitudeM(pa) - groundAltM) * scale);
       }).toList();
       label = 'Altitude above arm point ($unit)';
     } else {
-      // Fallback: raw ΔPressure when no altitude data is available.
-      spots = samples.map((s) => FlSpot(s.timeSec, widget.data.deltaPress(s).toDouble())).toList();
+      spotsA = samples.map((s) => FlSpot(s.timeSec, widget.data.deltaPress(s).toDouble())).toList();
       label = 'Relative altitude (raw ΔPressure — no altitude data available)';
+    }
+
+    List<FlSpot> spotsB = const [];
+    if (_isComparing) {
+      final s2 = widget.data2!.samples;
+      // CSV files always have altitudeM pre-computed; ΔP is a last-resort fallback.
+      spotsB = s2.first.altitudeM != null
+          ? s2.map((s) => FlSpot(s.timeSec, (s.altitudeM ?? 0) * scale)).toList()
+          : s2.map((s) => FlSpot(s.timeSec, widget.data2!.deltaPress(s).toDouble())).toList();
+    }
+
+    // Normalize each flight so the first sample is exactly at altitude 0,
+    // removing any small baseline offset from ground-reference capture timing.
+    if (spotsA.isNotEmpty) {
+      final off = spotsA.first.y;
+      if (off != 0) spotsA = spotsA.map((s) => FlSpot(s.x, s.y - off)).toList();
+    }
+    if (spotsB.isNotEmpty) {
+      final off = spotsB.first.y;
+      if (off != 0) spotsB = spotsB.map((s) => FlSpot(s.x, s.y - off)).toList();
     }
 
     return Padding(
@@ -118,7 +159,13 @@ class _FlightChartState extends State<FlightChart>
         children: [
           Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
           const SizedBox(height: 4),
-          Expanded(child: _lineChart(spots, Colors.blue, samples.first.altitudeM != null || calib != null ? unit : 'ΔP')),
+          Expanded(
+            child: _lineChart(
+              spotsA, _altColorA,
+              samples.first.altitudeM != null || calib != null ? unit : 'ΔP',
+              spotsB: spotsB, colorB: _altColorB,
+            ),
+          ),
         ],
       ),
     );
@@ -128,7 +175,10 @@ class _FlightChartState extends State<FlightChart>
     final samples = widget.data.samples;
     if (samples.isEmpty) return const Center(child: Text('No data'));
 
-    final spots = samples.map((s) => FlSpot(s.timeSec, s.accelMagG)).toList();
+    final spotsA = samples.map((s) => FlSpot(s.timeSec, s.accelMagG)).toList();
+    final spotsB = _isComparing
+        ? widget.data2!.samples.map((s) => FlSpot(s.timeSec, s.accelMagG)).toList()
+        : const <FlSpot>[];
 
     return Padding(
       padding: const EdgeInsets.all(12),
@@ -138,19 +188,36 @@ class _FlightChartState extends State<FlightChart>
           const Text('Acceleration magnitude (g)',
               style: TextStyle(fontSize: 11, color: Colors.grey)),
           const SizedBox(height: 4),
-          Expanded(child: _lineChart(spots, Colors.orange, 'g')),
+          Expanded(
+            child: _lineChart(
+              spotsA, _accelColorA, 'g',
+              spotsB: spotsB, colorB: _accelColorB,
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _lineChart(List<FlSpot> spots, Color color, String yUnit) {
-    if (spots.isEmpty) return const SizedBox();
+  Widget _lineChart(
+    List<FlSpot> spotsA,
+    Color colorA,
+    String yUnit, {
+    List<FlSpot> spotsB = const [],
+    Color colorB = Colors.red,
+  }) {
+    if (spotsA.isEmpty) return const SizedBox();
 
-    final dataMinX = spots.first.x;
-    final dataMaxX = spots.last.x;
-    final dataMinY = spots.map((s) => s.y).reduce(math.min);
-    final dataMaxY = spots.map((s) => s.y).reduce(math.max);
+    // Data range is the union of both datasets.
+    final dataMinX = spotsB.isEmpty
+        ? spotsA.first.x
+        : math.min(spotsA.first.x, spotsB.first.x);
+    final dataMaxX = spotsB.isEmpty
+        ? spotsA.last.x
+        : math.max(spotsA.last.x, spotsB.last.x);
+    final allY = [...spotsA.map((s) => s.y), ...spotsB.map((s) => s.y)];
+    final dataMinY = allY.reduce(math.min);
+    final dataMaxY = allY.reduce(math.max);
     final yPad = (dataMaxY - dataMinY) * 0.05;
 
     final viewMinX = _zoomMinX ?? dataMinX;
@@ -198,8 +265,9 @@ class _FlightChartState extends State<FlightChart>
               }
             },
             onPointerMove: (e) {
-              if (_selStart != null)
+              if (_selStart != null) {
                 setState(() => _selCurrent = e.localPosition);
+              }
             },
             onPointerUp: (e) {
               final s = _selStart;
@@ -233,13 +301,16 @@ class _FlightChartState extends State<FlightChart>
                 borderData: FlBorderData(show: true),
                 lineTouchData: LineTouchData(
                   touchTooltipData: LineTouchTooltipData(
-                    getTooltipItems: (spots) => spots
-                        .map((s) => LineTooltipItem(
-                              't=${s.x.toStringAsFixed(2)}s\n'
-                              '${s.y.toStringAsFixed(2)} $yUnit',
-                              const TextStyle(fontSize: 11),
-                            ))
-                        .toList(),
+                    getTooltipItems: (touchedSpots) => touchedSpots.map((s) {
+                      final prefix = spotsB.isNotEmpty
+                          ? (s.barIndex == 0 ? 'A: ' : 'B: ')
+                          : '';
+                      return LineTooltipItem(
+                        '${prefix}t=${s.x.toStringAsFixed(2)}s\n'
+                        '${s.y.toStringAsFixed(2)} $yUnit',
+                        const TextStyle(fontSize: 11),
+                      );
+                    }).toList(),
                   ),
                 ),
                 titlesData: FlTitlesData(
@@ -278,13 +349,22 @@ class _FlightChartState extends State<FlightChart>
                 ),
                 lineBarsData: [
                   LineChartBarData(
-                    spots: spots,
+                    spots: spotsA,
                     isCurved: false,
-                    color: color,
+                    color: colorA,
                     barWidth: 1.5,
                     dotData: const FlDotData(show: false),
                     belowBarData: BarAreaData(show: false),
                   ),
+                  if (spotsB.isNotEmpty)
+                    LineChartBarData(
+                      spots: spotsB,
+                      isCurved: false,
+                      color: colorB,
+                      barWidth: 1.5,
+                      dotData: const FlDotData(show: false),
+                      belowBarData: BarAreaData(show: false),
+                    ),
                 ],
               ),
             ),

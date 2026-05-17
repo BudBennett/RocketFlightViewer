@@ -13,6 +13,8 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   bool _statsVisible = true;
+  Color _colorA = Colors.blue;
+  Color _colorB = Colors.pinkAccent;
 
   @override
   Widget build(BuildContext context) {
@@ -23,12 +25,46 @@ class _HistoryScreenState extends State<HistoryScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.upload_file, size: 16),
-                label: const Text('Upload CSV'),
-                onPressed: ctrl.isBusy ? null : () => ctrl.importCsv(),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.upload_file, size: 16),
+                      label: const Text('Import Flight'),
+                      onPressed: ctrl.isBusy ? null : () => ctrl.importCsv(context),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.compare_arrows, size: 16),
+                      label: const Text('Compare Flights'),
+                      onPressed: ctrl.isBusy || ctrl.historyData == null
+                          ? null
+                          : () => ctrl.importCsvCompare(context),
+                    ),
+                  ),
+                ],
               ),
             ),
+            if (ctrl.historyFileName != null || ctrl.historyFileName2 != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _fileLabel(context, 'A', ctrl.historyFileName,
+                          _colorA, null),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _fileLabel(context, 'B', ctrl.historyFileName2,
+                          _colorB,
+                          ctrl.historyFileName2 != null ? ctrl.clearHistoryCompare : null),
+                    ),
+                  ],
+                ),
+              ),
             if (ctrl.isBusy)
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -38,6 +74,42 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ],
         );
       },
+    );
+  }
+
+  Widget _fileLabel(BuildContext context, String slot, String? name,
+      Color swatchColor, VoidCallback? onClear) {
+    if (name == null) return const SizedBox.shrink();
+    return Row(
+      children: [
+        Container(
+          width: 18,
+          height: 3,
+          decoration: BoxDecoration(
+            color: swatchColor,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            'Flight $slot: $name',
+            style: TextStyle(
+                fontSize: 11, color: swatchColor),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (onClear != null)
+          InkWell(
+            onTap: onClear,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.all(2),
+              child: Icon(Icons.close, size: 13,
+                  color: Theme.of(context).colorScheme.outline),
+            ),
+          ),
+      ],
     );
   }
 
@@ -51,6 +123,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
               data: data,
               calib: ctrl.historyCalib,
               useImperial: ctrl.useImperial,
+              data2: ctrl.historyData2,
+              onColorsChanged: (a, b) => setState(() { _colorA = a; _colorB = b; }),
             ),
           ),
           if (ctrl.historyStats != null) ...[
@@ -83,6 +157,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 child: StatsWidget(
                   stats: ctrl.historyStats!,
                   calib: ctrl.historyCalib,
+                  stats2: ctrl.historyStats2,
+                  colorA: _colorA,
+                  colorB: _colorB,
                 ),
               ),
           ],
@@ -92,7 +169,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return const Center(
       child: Text(
-        'Upload a saved CSV file to view a previous flight',
+        'Import a saved CSV file to view a previous flight',
         style: TextStyle(color: Colors.grey),
       ),
     );

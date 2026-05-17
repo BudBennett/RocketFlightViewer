@@ -49,7 +49,7 @@ class _ConfigWidgetState extends State<ConfigWidget> {
       return;
     }
     setState(() => _error = null);
-    widget.controller.setConfig(val, _lpfSetting, widget.controller.configFastMaxS ?? 30);
+    widget.controller.setConfig(val, _lpfSetting, widget.controller.configFastMaxS ?? 30, widget.controller.configOdrSel ?? 0x02);
   }
 
   @override

@@ -5,8 +5,9 @@ class FlightMetadata {
   final int slowPeriodMs;
   final int fastCount;
   final int totalCount;
-  final int groundRawPress;   // baro pressure snapshot at arm time; 0 = not available
-  final int groundRawTemp;    // baro temperature snapshot at arm time; 0 = not available
+  final int groundRawPress;       // baro pressure snapshot at arm time; 0 = not available
+  final int groundRawTemp;        // baro temperature snapshot at arm time; 0 = not available
+  final double actualFastPeriodMs; // 0.0 = not available (no correction data)
 
   const FlightMetadata({
     required this.fastPeriodMs,
@@ -15,6 +16,7 @@ class FlightMetadata {
     required this.totalCount,
     this.groundRawPress = 0,
     this.groundRawTemp = 0,
+    this.actualFastPeriodMs = 0.0,
   });
 }
 

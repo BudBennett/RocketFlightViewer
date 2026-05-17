@@ -9,6 +9,7 @@ class SerialService {
   final _rxBuffer = <int>[];
 
   void Function(bool isTx, List<int> bytes)? onLog;
+  void Function()? onDisconnect;
 
   List<String> get availablePorts => SerialPort.availablePorts;
 
@@ -36,7 +37,8 @@ class SerialService {
           _rxBuffer.addAll(data);
           onLog?.call(false, data);
         },
-        onError: (_) {},
+        onError: (_) => onDisconnect?.call(),
+        onDone:  ()  => onDisconnect?.call(),
       );
       return true;
     } catch (_) {

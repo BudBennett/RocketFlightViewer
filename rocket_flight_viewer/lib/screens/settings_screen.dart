@@ -20,6 +20,24 @@ const _lpfLabels = [
   'ODR/800 — 0.13 Hz',
 ];
 
+const _odrLabels = {
+  0x02: '50 Hz',
+  0x03: '25 Hz',
+  0x04: '12.5 Hz',
+  0x05: '6.25 Hz',
+};
+
+/// Maximum allowed fast-phase duration in seconds: lesser of 255 (uint8 max)
+/// and the number of seconds that fills storage at the configured sample rate.
+int _maxFastMaxS(int? productType, int odrSel) {
+  if (productType == null) return 255;
+  final storageBytes = productType == 3 ? 131072 : 65536;
+  const sampleBytes = 18;
+  final fastHz = 50.0 / (1 << (odrSel - 0x02));
+  final limit = (storageBytes / (fastHz * sampleBytes)).floor();
+  return limit < 255 ? limit : 255;
+}
+
 class _SettingsScreenState extends State<SettingsScreen> {
   final _thrController = TextEditingController();
   bool _thrChanged = false;
@@ -29,6 +47,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _fastMaxController = TextEditingController();
   bool _fastMaxChanged = false;
   int? _lastSyncedFastMax;
+  int _odrSel = 0x02; // default 50 Hz
+  int? _lastSyncedOdrSel;
 
   @override
   void dispose() {
@@ -65,6 +85,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         } else if (ctrl.configFastMaxS != null && ctrl.configFastMaxS != _lastSyncedFastMax) {
           _lastSyncedFastMax = ctrl.configFastMaxS;
           if (!_fastMaxChanged) _fastMaxController.text = ctrl.configFastMaxS.toString();
+        }
+        if (ctrl.configOdrSel == null && _lastSyncedOdrSel != null) {
+          _lastSyncedOdrSel = null;
+          _odrSel = 0x02;
+        } else if (ctrl.configOdrSel != null && ctrl.configOdrSel != _lastSyncedOdrSel) {
+          _lastSyncedOdrSel = ctrl.configOdrSel;
+          _odrSel = ctrl.configOdrSel!.clamp(0x02, 0x05);
         }
 
         return ListView(
@@ -129,6 +156,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       val,
                                       ctrl.configLpfSetting ?? 1,
                                       int.tryParse(_fastMaxController.text) ?? ctrl.configFastMaxS ?? 30,
+                                      _odrSel,
                                     );
                                     setState(() => _thrChanged = false);
                                   }
@@ -178,6 +206,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   int.tryParse(_thrController.text) ?? ctrl.configThrMg ?? 2000,
                                   v,
                                   int.tryParse(_fastMaxController.text) ?? ctrl.configFastMaxS ?? 30,
+                                  _odrSel,
+                                );
+                              }
+                            }
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                    Text('Fast Sample Rate',
+                        style: Theme.of(context).textTheme.labelLarge),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Baro ODR during boost phase. Lower rates extend fast-phase capacity at the cost of time resolution.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButton<int>(
+                      value: _odrSel,
+                      isExpanded: true,
+                      items: _odrLabels.entries.map((e) => DropdownMenuItem(
+                        value: e.key,
+                        child: Text(e.value),
+                      )).toList(),
+                      onChanged: (ctrl.isConnected && !ctrl.isBusy && !ctrl.liveActive)
+                          ? (v) {
+                              if (v != null) {
+                                setState(() => _odrSel = v);
+                                ctrl.setConfig(
+                                  int.tryParse(_thrController.text) ?? ctrl.configThrMg ?? 2000,
+                                  _lpfSetting,
+                                  int.tryParse(_fastMaxController.text) ?? ctrl.configFastMaxS ?? 30,
+                                  v,
                                 );
                               }
                             }
@@ -187,11 +246,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Text('Fast Phase Duration',
                         style: Theme.of(context).textTheme.labelLarge),
                     const SizedBox(height: 4),
-                    Text(
-                      'Maximum duration of 50 Hz recording (launch through apogee). '
-                      'Apogee detection ends the fast phase earlier when detected.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
-                    ),
+                    Builder(builder: (context) {
+                      final hz = _odrLabels[_odrSel] ?? '50 Hz';
+                      return Text(
+                        'Maximum duration of $hz recording (launch through apogee). '
+                        'Apogee detection ends the fast phase earlier when detected.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                      );
+                    }),
                     const SizedBox(height: 12),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -218,11 +280,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   !ctrl.liveActive)
                               ? () async {
                                   final val = int.tryParse(_fastMaxController.text);
-                                  if (val != null && val >= 5 && val <= 120) {
+                                  final maxS = _maxFastMaxS(ctrl.productType, _odrSel);
+                                  if (val != null && val >= 5 && val <= maxS) {
                                     await ctrl.setConfig(
                                       int.tryParse(_thrController.text) ?? ctrl.configThrMg ?? 2000,
                                       _lpfSetting,
                                       val,
+                                      _odrSel,
                                     );
                                     setState(() => _fastMaxChanged = false);
                                   }
@@ -237,27 +301,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       final enteredVal = int.tryParse(_fastMaxController.text);
                       final fastMax = enteredVal ?? ctrl.configFastMaxS;
                       final pt = ctrl.productType;
+                      final maxS = _maxFastMaxS(pt, _odrSel);
                       if (fastMax == null || pt == null) {
                         return Text(
-                          'Range: 5–120 s. Connect to see capacity estimate.',
+                          'Range: 5–$maxS s. Connect to see capacity estimate.',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
                         );
                       }
                       final storageBytes = pt == 3 ? 131072 : 65536;
                       const sampleBytes = 18;
-                      const fastHz = 50;
-                      final fastBytesMax = fastMax * fastHz * sampleBytes;
-                      final fastSamples = fastMax * fastHz;
+                      final fastHz = 50.0 / (1 << (_odrSel - 0x02));
+                      final fastBytesMax = (fastMax * fastHz * sampleBytes).round();
+                      final fastSamples = (fastMax * fastHz).round();
+                      final hzLabel = _odrLabels[_odrSel] ?? '50 Hz';
+                      if (fastMax > maxS) {
+                        return Text(
+                          'Max allowed: $maxS s at $hzLabel — enter $maxS or less.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.orange),
+                        );
+                      }
                       if (fastBytesMax >= storageBytes) {
                         return Text(
-                          'Warning: $fastMax s at 50 Hz fills storage completely — no slow phase capacity.',
+                          '$fastMax s at $hzLabel fills storage — no slow phase capacity.',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.orange),
                         );
                       }
                       final slowSamples = (storageBytes - fastBytesMax) ~/ sampleBytes;
                       final slowMin = slowSamples ~/ 60;
                       return Text(
-                        'Up to $fastSamples fast samples ($fastMax s). '
+                        'Up to $fastSamples fast samples ($fastMax s at $hzLabel). '
                         'At least $slowMin min slow recording remaining.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
                       );
@@ -276,13 +348,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 const defaultThr = 2000;
                                 const defaultLpf = 1;
                                 const defaultFastMax = 30;
-                                await ctrl.setConfig(defaultThr, defaultLpf, defaultFastMax);
+                                const defaultOdrSel = 0x02;
+                                await ctrl.setConfig(defaultThr, defaultLpf, defaultFastMax, defaultOdrSel);
                                 setState(() {
                                   _thrController.text = defaultThr.toString();
                                   _thrChanged = false;
                                   _lpfSetting = defaultLpf;
                                   _fastMaxController.text = defaultFastMax.toString();
                                   _fastMaxChanged = false;
+                                  _odrSel = defaultOdrSel;
                                 });
                               }
                             : null,

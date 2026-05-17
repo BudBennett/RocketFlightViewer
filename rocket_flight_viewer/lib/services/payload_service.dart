@@ -10,18 +10,18 @@ class PayloadService {
 
   PayloadService(this._serial);
 
-  // Returns (thrMg, lpfSetting, fastPhaseMaxS) or null on failure.
-  Future<(int, int, int)?> getConfig() async {
+  // Returns (thrMg, lpfSetting, fastPhaseMaxS, odrSel) or null on failure.
+  Future<(int, int, int, int)?> getConfig() async {
     _serial.flushRx();
     if (!_serial.sendBytes([0x43])) return null; // 'C'
-    final data = await _serial.readBytes(4, timeoutMs: 2000);
+    final data = await _serial.readBytes(5, timeoutMs: 2000);
     if (data == null) return null;
-    return ((data[0] << 8) | data[1], data[2], data[3]); // thrMg, lpfSetting, fastPhaseMaxS
+    return ((data[0] << 8) | data[1], data[2], data[3], data[4]); // thrMg, lpf, fastMaxS, odrSel
   }
 
-  Future<bool> setConfig(int thrMg, int lpfSetting, int fastPhaseMaxS) async {
+  Future<bool> setConfig(int thrMg, int lpfSetting, int fastPhaseMaxS, int odrSel) async {
     _serial.flushRx();
-    if (!_serial.sendBytes([0x53, (thrMg >> 8) & 0xFF, thrMg & 0xFF, lpfSetting & 0xFF, fastPhaseMaxS & 0xFF])) return false; // 'S'
+    if (!_serial.sendBytes([0x53, (thrMg >> 8) & 0xFF, thrMg & 0xFF, lpfSetting & 0xFF, fastPhaseMaxS & 0xFF, odrSel & 0xFF])) return false; // 'S'
     final data = await _serial.readBytes(1, timeoutMs: 2000);
     return data != null && data[0] == 0x41; // 'A'
   }
@@ -81,16 +81,27 @@ class PayloadService {
     _serial.flushRx();
     if (!_serial.sendBytes([0x44])) return null; // 'D'
 
-    // 14-byte metadata: uint16 x4 LE + uint24 LE ground_raw_press + uint24 LE ground_raw_temp
-    final meta = await _serial.readBytes(14, timeoutMs: 3000);
+    // 20-byte metadata: uint16 x4 + uint24 x2 + uint16 + uint32 (all LE)
+    //   fast_period_ms, slow_period_ms, fast_count, total_count (uint16 each)
+    //   ground_raw_press, ground_raw_temp (uint24 each)
+    //   calib_drdy_count (uint16), calib_elapsed_ticks (uint32)
+    final meta = await _serial.readBytes(20, timeoutMs: 3000);
     if (meta == null) return null;
 
-    final fastPeriodMs   = meta[0] | (meta[1] << 8);
-    final slowPeriodMs   = meta[2] | (meta[3] << 8);
-    final fastCount      = meta[4] | (meta[5] << 8);
-    final totalCount     = meta[6] | (meta[7] << 8);
-    final groundRawPress = meta[8]  | (meta[9]  << 8) | (meta[10] << 16);
-    final groundRawTemp  = meta[11] | (meta[12] << 8) | (meta[13] << 16);
+    final fastPeriodMs        = meta[0]  | (meta[1]  << 8);
+    final slowPeriodMs        = meta[2]  | (meta[3]  << 8);
+    final fastCount           = meta[4]  | (meta[5]  << 8);
+    final totalCount          = meta[6]  | (meta[7]  << 8);
+    final groundRawPress      = meta[8]  | (meta[9]  << 8) | (meta[10] << 16);
+    final groundRawTemp       = meta[11] | (meta[12] << 8) | (meta[13] << 16);
+    final calibDrdyCount      = meta[14] | (meta[15] << 8);
+    final calibElapsedTicks   = meta[16] | (meta[17] << 8) | (meta[18] << 16) | (meta[19] << 24);
+
+    // Timer0 tick = 256 × (1 / (8MHz/4/8)) = 1.024 ms; apply baro ODR correction.
+    const timer0PeriodMs = 1.024;
+    final actualFastPeriodMs = calibDrdyCount > 0
+        ? (calibElapsedTicks * timer0PeriodMs) / calibDrdyCount
+        : fastPeriodMs.toDouble();
 
     final metadata = FlightMetadata(
       fastPeriodMs: fastPeriodMs,
@@ -99,6 +110,7 @@ class PayloadService {
       totalCount: totalCount,
       groundRawPress: groundRawPress,
       groundRawTemp: groundRawTemp,
+      actualFastPeriodMs: actualFastPeriodMs,
     );
 
     if (totalCount == 0) {
@@ -125,8 +137,8 @@ class PayloadService {
       final rawTemp = raw[b + 15] | (raw[b + 16] << 8) | (raw[b + 17] << 16);
 
       final timeMs = i < fastCount
-          ? i * fastPeriodMs
-          : fastCount * fastPeriodMs + (i - fastCount) * slowPeriodMs;
+          ? (i * actualFastPeriodMs).round()
+          : (fastCount * actualFastPeriodMs).round() + (i - fastCount) * slowPeriodMs;
 
       samples.add(FlightSample(
         timeMs: timeMs,
