@@ -31,6 +31,7 @@ class RocketFlightViewerApp extends StatelessWidget {
           ),
           useMaterial3: true,
         ),
+        debugShowCheckedModeBanner: false,
         themeMode: ctrl.themeMode,
         home: const HomeScreen(),
       ),

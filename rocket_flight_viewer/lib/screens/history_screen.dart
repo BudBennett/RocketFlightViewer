@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../controllers/flight_controller.dart';
@@ -18,6 +19,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (Platform.isAndroid) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Text(
+            'Flight history comparison is not yet available on Android.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
     return Consumer<FlightController>(
       builder: (context, ctrl, _) {
         return Column(

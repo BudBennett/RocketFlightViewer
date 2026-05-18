@@ -1,21 +1,27 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
+import 'base_serial_service.dart';
 
-class SerialService {
+class SerialService extends BaseSerialService {
   SerialPort? _port;
   SerialPortReader? _reader;
   StreamSubscription<Uint8List>? _sub;
   final _rxBuffer = <int>[];
 
+  @override
   void Function(bool isTx, List<int> bytes)? onLog;
+  @override
   void Function()? onDisconnect;
 
+  @override
   List<String> get availablePorts => SerialPort.availablePorts;
 
+  @override
   bool get isConnected => _port != null && (_port?.isOpen ?? false);
 
-  bool connect(String portName) {
+  @override
+  Future<bool> connectAsync(String portName) async {
     try {
       _port = SerialPort(portName);
       if (!_port!.openReadWrite()) {
@@ -38,7 +44,7 @@ class SerialService {
           onLog?.call(false, data);
         },
         onError: (_) => onDisconnect?.call(),
-        onDone:  ()  => onDisconnect?.call(),
+        onDone: () => onDisconnect?.call(),
       );
       return true;
     } catch (_) {
@@ -47,6 +53,7 @@ class SerialService {
     }
   }
 
+  @override
   void disconnect() {
     _sub?.cancel();
     _sub = null;
@@ -59,8 +66,10 @@ class SerialService {
     _rxBuffer.clear();
   }
 
+  @override
   void flushRx() => _rxBuffer.clear();
 
+  @override
   bool sendBytes(List<int> bytes) {
     if (_port == null) return false;
     try {
@@ -72,6 +81,7 @@ class SerialService {
     }
   }
 
+  @override
   Future<Uint8List?> readBytes(int count, {int timeoutMs = 3000}) async {
     final deadline = DateTime.now().add(Duration(milliseconds: timeoutMs));
     while (_rxBuffer.length < count) {

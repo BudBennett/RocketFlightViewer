@@ -3,10 +3,10 @@ import '../models/flight_data.dart';
 import '../models/flight_sample.dart';
 import '../models/flight_stats.dart';
 import '../models/live_sample.dart';
-import 'serial_service.dart';
+import 'base_serial_service.dart';
 
 class PayloadService {
-  final SerialService _serial;
+  final BaseSerialService _serial;
 
   PayloadService(this._serial);
 

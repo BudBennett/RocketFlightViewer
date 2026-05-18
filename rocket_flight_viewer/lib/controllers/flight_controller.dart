@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/bmp384_calib.dart';
 import '../models/flight_sample.dart';
@@ -10,18 +12,21 @@ import '../models/comm_entry.dart';
 import '../models/flight_data.dart';
 import '../models/flight_stats.dart';
 import '../models/live_sample.dart';
+import '../services/base_serial_service.dart';
 import '../services/serial_service.dart';
+import '../services/android_serial_service.dart';
 import '../services/payload_service.dart';
 
 enum AppStatus { disconnected, connected, busy, error }
 
 class FlightController extends ChangeNotifier {
-  final _serial = SerialService();
+  late final BaseSerialService _serial;
   late final _payload = PayloadService(_serial);
 
   final List<CommEntry> commLog = [];
 
   FlightController() {
+    _serial = Platform.isAndroid ? AndroidSerialService() : SerialService();
     _serial.onLog = (isTx, bytes) {
       if (commLog.length >= 1000) commLog.removeAt(0);
       commLog.add(CommEntry(isTx: isTx, bytes: bytes));
@@ -93,6 +98,11 @@ class FlightController extends ChangeNotifier {
   bool get isError => status == AppStatus.error;
   List<String> get availablePorts => _serial.availablePorts;
 
+  Future<void> refreshPorts() async {
+    await _serial.refreshPorts();
+    notifyListeners();
+  }
+
   void selectPort(String? port) {
     selectedPort = port;
     notifyListeners();
@@ -112,9 +122,9 @@ class FlightController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void connect() {
+  Future<void> connect() async {
     if (selectedPort == null) return;
-    if (_serial.connect(selectedPort!)) {
+    if (await _serial.connectAsync(selectedPort!)) {
       _serial.onDisconnect = _onPortUnplugged;
       // Clear all device-specific data so stale values never show on reconnect.
       configThrMg = null;
@@ -284,10 +294,21 @@ class FlightController extends ChangeNotifier {
     return slowSamples ~/ 60;
   }
 
-  Future<void> exportCsv() async {
+  String get defaultExportFileName {
+    final now = DateTime.now();
+    final stamp =
+        '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}'
+        '_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}';
+    return 'flight_$stamp.csv';
+  }
+
+  Future<void> exportCsv(String fileName) async {
     final data = flightData;
     if (data == null || data.isEmpty) return;
-    _busy('Preparing CSV…');
+
+    // Android export is near-instant (write to temp + share sheet); skip the
+    // busy state so the tree doesn't swap to the spinner and back mid-animation.
+    if (!Platform.isAndroid) _busy('Preparing CSV…');
 
     final c = calib;
     final sb = StringBuffer();
@@ -323,18 +344,28 @@ class FlightController extends ChangeNotifier {
       sb.writeln('${s.timeSec.toStringAsFixed(3)},${s.rawPress},${s.rawTemp},$altM,${s.accelX},${s.accelY},${s.accelZ},${s.accelMagG.toStringAsFixed(4)},$gx,$gy,$gz');
     }
 
-    final path = await FilePicker.saveFile(
-      dialogTitle: 'Save flight data',
-      fileName: 'flight_data.csv',
-      type: FileType.custom,
-      allowedExtensions: ['csv'],
-    );
-
-    if (path != null) {
-      await File(path).writeAsString(sb.toString());
-      _done('CSV saved');
+    if (Platform.isAndroid) {
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsString(sb.toString());
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'text/csv')],
+        subject: 'Flight Data',
+      );
+      _done('CSV saved: $fileName');
     } else {
-      _done('Export cancelled');
+      final path = await FilePicker.saveFile(
+        dialogTitle: 'Save flight data',
+        fileName: fileName,
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+      );
+      if (path != null) {
+        await File(path).writeAsString(sb.toString());
+        _done('CSV saved');
+      } else {
+        _done('Export cancelled');
+      }
     }
   }
 

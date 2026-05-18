@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -183,29 +184,31 @@ class _SectionCard extends StatelessWidget {
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
-                if (showChart)
+                if (!Platform.isAndroid) ...[
+                  if (showChart)
+                    SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        iconSize: 16,
+                        icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
+                        tooltip: isPaused ? 'Resume' : 'Pause',
+                        onPressed: onTogglePause,
+                      ),
+                    ),
                   SizedBox(
                     width: 28,
                     height: 28,
                     child: IconButton(
                       padding: EdgeInsets.zero,
                       iconSize: 16,
-                      icon: Icon(isPaused ? Icons.play_arrow : Icons.pause),
-                      tooltip: isPaused ? 'Resume' : 'Pause',
-                      onPressed: onTogglePause,
+                      icon: Icon(showChart ? Icons.format_list_numbered : Icons.show_chart),
+                      tooltip: showChart ? 'Show values' : 'Show chart',
+                      onPressed: onToggleChart,
                     ),
                   ),
-                SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    iconSize: 16,
-                    icon: Icon(showChart ? Icons.format_list_numbered : Icons.show_chart),
-                    tooltip: showChart ? 'Show values' : 'Show chart',
-                    onPressed: onToggleChart,
-                  ),
-                ),
+                ],
               ],
             ),
             const SizedBox(height: 10),

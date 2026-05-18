@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../controllers/flight_controller.dart';
@@ -7,6 +8,11 @@ import '../widgets/stats_widget.dart';
 import '../widgets/monitor_widget.dart';
 import 'settings_screen.dart';
 import 'history_screen.dart';
+
+Future<void> _saveFlightData(BuildContext context, FlightController ctrl) async {
+  final fileName = ctrl.defaultExportFileName;
+  ctrl.exportCsv(fileName);
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,22 +26,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<FlightController>(
-      builder: (context, ctrl, _) {
-        return DefaultTabController(
-          length: 3,
-          child: Scaffold(
+    return DefaultTabController(
+      length: 3,
+      child: Consumer<FlightController>(
+        builder: (context, ctrl, _) {
+          return Scaffold(
             appBar: AppBar(
               title: const Text('Rocket Flight Viewer'),
               actions: [
-                IconButton(
-                  icon: Icon(
-                    Icons.terminal,
-                    color: _showMonitor ? Theme.of(context).colorScheme.primary : null,
+                if (!Platform.isAndroid)
+                  IconButton(
+                    icon: Icon(
+                      Icons.terminal,
+                      color: _showMonitor ? Theme.of(context).colorScheme.primary : null,
+                    ),
+                    tooltip: 'Toggle monitor',
+                    onPressed: () => setState(() => _showMonitor = !_showMonitor),
                   ),
-                  tooltip: 'Toggle monitor',
-                  onPressed: () => setState(() => _showMonitor = !_showMonitor),
-                ),
               ],
               bottom: const TabBar(
                 tabs: [
@@ -68,9 +75,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
               ],
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
@@ -131,6 +138,25 @@ class _FlightDataTabState extends State<_FlightDataTab> {
     }
 
     if (ctrl.flightData != null && !ctrl.flightData!.isEmpty) {
+      if (Platform.isAndroid) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _AndroidSaveRow(ctrl: ctrl),
+              if (ctrl.flightStats != null) ...[
+                const SizedBox(height: 12),
+                StatsWidget(
+                  stats: ctrl.flightStats!,
+                  calib: ctrl.calib,
+                ),
+              ],
+            ],
+          ),
+        );
+      }
+
       return Column(
         children: [
           Padding(
@@ -140,7 +166,7 @@ class _FlightDataTabState extends State<_FlightDataTab> {
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.save_alt, size: 16),
                 label: const Text('Save Flight Data'),
-                onPressed: () => ctrl.exportCsv(),
+                onPressed: () => _saveFlightData(context, ctrl),
               ),
             ),
           ),
@@ -192,7 +218,9 @@ class _FlightDataTabState extends State<_FlightDataTab> {
       child: Text(
         ctrl.isConnected
             ? 'Press Download Data to retrieve flight data'
-            : 'Select a serial port and connect',
+            : Platform.isAndroid
+                ? 'Connect a USB device and tap Connect'
+                : 'Select a serial port and connect',
       ),
     );
   }
@@ -218,37 +246,6 @@ class _FlightDataActionRow extends StatelessWidget {
               icon: Icons.download,
               busy: disableNonLive,
               onPressed: () => ctrl.downloadFlight(),
-            ),
-          if (ctrl.hasStorage)
-            _ActionButton(
-              label: 'Erase',
-              icon: Icons.delete_outline,
-              busy: disableNonLive,
-              danger: true,
-              onPressed: () async {
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: const Text('Erase storage?'),
-                    content: const Text(
-                      'This will permanently delete all recorded flight data. '
-                      'Download first if you need the data.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        style: TextButton.styleFrom(foregroundColor: Colors.red),
-                        child: const Text('Erase'),
-                      ),
-                    ],
-                  ),
-                );
-                if (ok == true) await ctrl.eraseStorage();
-              },
             ),
           _ActionButton(
             label: ctrl.liveActive ? 'Stop Live' : 'Live',
@@ -289,7 +286,9 @@ class _ConnectionBarState extends State<_ConnectionBar> {
     _refresh();
   }
 
-  void _refresh() {
+  Future<void> _refresh() async {
+    await widget.ctrl.refreshPorts();
+    if (!mounted) return;
     setState(() => _ports = widget.ctrl.availablePorts);
     if (!_ports.contains(widget.ctrl.selectedPort)) {
       widget.ctrl.selectPort(_ports.isNotEmpty ? _ports.first : null);
@@ -305,15 +304,15 @@ class _ConnectionBarState extends State<_ConnectionBar> {
         children: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh port list',
-            onPressed: ctrl.isBusy ? null : _refresh,
+            tooltip: Platform.isAndroid ? 'Scan for USB devices' : 'Refresh port list',
+            onPressed: ctrl.isBusy ? null : () => _refresh(),
           ),
           const SizedBox(width: 4),
           Expanded(
             child: DropdownButton<String>(
               isExpanded: true,
               value: _ports.contains(ctrl.selectedPort) ? ctrl.selectedPort : null,
-              hint: const Text('Select port'),
+              hint: Text(Platform.isAndroid ? 'Select USB device' : 'Select port'),
               items: _ports
                   .map((p) => DropdownMenuItem(value: p, child: Text(p)))
                   .toList(),
@@ -328,7 +327,7 @@ class _ConnectionBarState extends State<_ConnectionBar> {
                 ? null
                 : ctrl.isConnected
                     ? ctrl.disconnect
-                    : ctrl.connect,
+                    : () => ctrl.connect(),
             style: ElevatedButton.styleFrom(
               backgroundColor: ctrl.isBusy
                   ? null
@@ -426,6 +425,66 @@ class _ActionButton extends StatelessWidget {
       style: danger
           ? OutlinedButton.styleFrom(foregroundColor: Colors.red)
           : null,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Android inline filename field + save button
+// ---------------------------------------------------------------------------
+
+class _AndroidSaveRow extends StatefulWidget {
+  final FlightController ctrl;
+  const _AndroidSaveRow({required this.ctrl});
+
+  @override
+  State<_AndroidSaveRow> createState() => _AndroidSaveRowState();
+}
+
+class _AndroidSaveRowState extends State<_AndroidSaveRow> {
+  late final TextEditingController _nameCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final full = widget.ctrl.defaultExportFileName;
+    _nameCtrl = TextEditingController(
+      text: full.endsWith('.csv') ? full.substring(0, full.length - 4) : full,
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _nameCtrl,
+            decoration: const InputDecoration(
+              suffixText: '.csv',
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.save_alt, size: 16),
+          label: const Text('Save'),
+          onPressed: () {
+            final name = _nameCtrl.text.trim();
+            if (name.isEmpty) return;
+            widget.ctrl.exportCsv('$name.csv');
+          },
+        ),
+      ],
     );
   }
 }
