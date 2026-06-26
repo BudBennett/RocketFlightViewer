@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Microchip MCP2221A, onboard the v2 PCB (vendor-id 0x04D8 = 1240, product-id 0x00DD = 221) -->
+    <usb-device vendor-id="1240" product-id="221" />
+    <!-- Silicon Labs CP2102N (vendor-id 0x10C4 = 4292, product-id 0xEA60 = 60000) — legacy v1 external adapter -->
+    <usb-device vendor-id="4292" product-id="60000" />
+</resources>

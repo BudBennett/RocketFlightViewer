@@ -1,0 +1,51 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.g.dart
+*.freezed.dart
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.properties
+*.keystore
+*.jks
+
+# iOS / macOS
+ios/Pods/
+macos/Pods/
+*.xcworkspace
+*.xcuserdata
+
+# Windows / Linux
+windows/flutter/generated_plugin_registrant.cc
+windows/flutter/generated_plugin_registrant.h
+linux/flutter/generated_plugin_registrant.cc
+linux/flutter/generated_plugin_registrant.h
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS / Google Drive sync artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local utility scripts (not for repo users)
+sync.bat
+Git_Instructions_for_Bud.txt
+
+# Release build artifacts (built by build.ps1 / build_android.ps1 / build_linux.sh,
+# attached to GitHub Releases manually, not tracked in git)
+*.zip
+*.apk
+
+# Icon design scratch files (top-level only — not rocket_flight_viewer/assets/icon.png)
+/icon.png
+/icon_render.html
+/make_icon_png.html
