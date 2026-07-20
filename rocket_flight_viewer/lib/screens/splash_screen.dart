@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'home_screen.dart';
 
 // Update kAppVersion when bumping pubspec.yaml version.
-const String kAppVersion = 'v2.0.0';
+const String kAppVersion = 'v2.0.1';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});

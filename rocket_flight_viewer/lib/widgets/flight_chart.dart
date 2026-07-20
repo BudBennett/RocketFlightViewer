@@ -116,7 +116,7 @@ class _FlightChartState extends State<FlightChart>
     final groundRawPress = widget.data.groundRawPress;
     final spotsA = samples.map((s) {
       final alt = lps22hb.altitudeM(s.rawPress, groundRawPress);
-      return FlSpot(s.timeSec, alt * scale);
+      return FlSpot(widget.data.shiftedTimeSec(s), alt * scale);
     }).toList();
 
     List<FlSpot> spotsB = const [];
@@ -125,7 +125,7 @@ class _FlightChartState extends State<FlightChart>
       final groundRawPress2 = widget.data2!.groundRawPress;
       spotsB = s2.map((s) {
         final alt = lps22hb.altitudeM(s.rawPress, groundRawPress2);
-        return FlSpot(s.timeSec, alt * scale);
+        return FlSpot(widget.data2!.shiftedTimeSec(s), alt * scale);
       }).toList();
     }
 
@@ -151,9 +151,13 @@ class _FlightChartState extends State<FlightChart>
     final samples = widget.data.samples;
     if (samples.isEmpty) return const Center(child: Text('No data'));
 
-    final spotsA = samples.map((s) => FlSpot(s.timeSec, s.accelMagG)).toList();
+    final spotsA = samples
+        .map((s) => FlSpot(widget.data.shiftedTimeSec(s), s.accelMagG))
+        .toList();
     final spotsB = _isComparing
-        ? widget.data2!.samples.map((s) => FlSpot(s.timeSec, s.accelMagG)).toList()
+        ? widget.data2!.samples
+            .map((s) => FlSpot(widget.data2!.shiftedTimeSec(s), s.accelMagG))
+            .toList()
         : const <FlSpot>[];
 
     return Padding(
@@ -200,6 +204,17 @@ class _FlightChartState extends State<FlightChart>
     final viewMaxX = _zoomMaxX ?? dataMaxX;
     final viewMinY = (_zoomMinY ?? dataMinY) - yPad;
     final viewMaxY = (_zoomMaxY ?? dataMaxY) + yPad;
+
+    // Explicit tick spacing + matching label precision, instead of
+    // fl_chart's default auto-interval + a fixed 1-decimal label: when
+    // zoomed in, the default interval can land closer together than 0.1
+    // apart, so consecutive ticks rounded to 1 decimal render as visually
+    // duplicate labels (e.g. "0.1  0.1  0.2  0.2"). Deriving both from the
+    // same "nice" step keeps them in sync at any zoom level.
+    final xStep = _niceStep(viewMaxX - viewMinX);
+    final yStep = _niceStep(viewMaxY - viewMinY);
+    final xDecimals = _decimalsForStep(xStep);
+    final yDecimals = _decimalsForStep(yStep);
 
     // Approximate chart area margins within the widget.
     // Left = y-axis reserved size; bottom = x-axis reserved + axis name label.
@@ -306,11 +321,9 @@ class _FlightChartState extends State<FlightChart>
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 28,
+                      interval: xStep,
                       getTitlesWidget: (v, _) {
-                        final label = v % 1 == 0
-                            ? v.toInt().toString()
-                            : v.toStringAsFixed(1);
-                        return Text(label,
+                        return Text(v.toStringAsFixed(xDecimals),
                             style: const TextStyle(fontSize: 10));
                       },
                     ),
@@ -319,11 +332,9 @@ class _FlightChartState extends State<FlightChart>
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 52,
+                      interval: yStep,
                       getTitlesWidget: (v, _) {
-                        final label = v % 1 == 0
-                            ? v.toInt().toString()
-                            : v.toStringAsFixed(1);
-                        return Text(label,
+                        return Text(v.toStringAsFixed(yDecimals),
                             style: const TextStyle(fontSize: 10));
                       },
                     ),
@@ -386,13 +397,44 @@ class _FlightChartState extends State<FlightChart>
     });
   }
 
+  // Picks a "nice" grid step (1, 2, or 5 * 10^n) targeting ~6 ticks across
+  // the given axis range, so tick values stay evenly spaced and legible at
+  // any zoom level.
+  static double _niceStep(double range, {int targetTicks = 6}) {
+    if (range <= 0) return 1.0;
+    final rough = range / targetTicks;
+    final exponent = (math.log(rough) / math.ln10).floor();
+    final magnitude = math.pow(10, exponent).toDouble();
+    final residual = rough / magnitude;
+    final double niceResidual;
+    if (residual < 1.5) {
+      niceResidual = 1;
+    } else if (residual < 3.5) {
+      niceResidual = 2;
+    } else if (residual < 7.5) {
+      niceResidual = 5;
+    } else {
+      niceResidual = 10;
+    }
+    return niceResidual * magnitude;
+  }
+
+  // Decimal places needed so consecutive multiples of `step` never round to
+  // the same displayed label. _niceStep always returns {1,2,5} * 10^n, so
+  // this is just -n (clamped to 0 for whole-number steps).
+  static int _decimalsForStep(double step) {
+    if (step <= 0) return 0;
+    final exponent = (math.log(step) / math.ln10).floor();
+    return math.max(0, -exponent);
+  }
+
   Widget _buildSummaryRow() {
     final meta = widget.data.metadata;
     final n = meta.totalCount;
     final fastSec =
         (meta.fastCount * meta.fastPeriodMs / 1000).toStringAsFixed(1);
     final totalSec = widget.data.samples.isNotEmpty
-        ? widget.data.samples.last.timeSec.toStringAsFixed(1)
+        ? widget.data.shiftedTimeSec(widget.data.samples.last).toStringAsFixed(1)
         : '—';
 
     return Padding(

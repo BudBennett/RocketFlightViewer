@@ -13,6 +13,7 @@ class FlightStats {
   final int groundRawTemp;    // baro temperature at arm time; 0 = not recorded
   final double? maxAltM;      // max altitude above ground
   final int baroType;         // 1=LPS22HB, 2=BMP581 — needed to scale groundRawPress to an absolute MSL altitude
+  final int ignitionOffsetMs; // true-ignition shift applied to all *Ms fields above — see FlightData.ignitionOffsetMs
 
   const FlightStats({
     required this.flightTimeMs,
@@ -25,6 +26,7 @@ class FlightStats {
     this.groundRawTemp = 0,
     this.maxAltM,
     this.baroType = 1,
+    this.ignitionOffsetMs = 0,
   });
 
   factory FlightStats.fromData(FlightData data) {
@@ -45,9 +47,15 @@ class FlightStats {
     int burnoutIdx = 0;
     int timeBurnoutMs = 0;
     const burnoutThreshMg = 1300;
-    final fastEnd = min(data.metadata.fastCount, samples.length);
+    // samples[] has preLaunchCount pre-launch entries prepended before the
+    // fast phase (see payload_service.dart's `fi = i - preLaunchCount`) — the
+    // fast phase itself runs from preLaunchCount to preLaunchCount+fastCount.
+    final fastStart = min(data.metadata.preLaunchCount, samples.length);
+    final fastEnd = min(
+        data.metadata.preLaunchCount + data.metadata.fastCount,
+        samples.length);
     bool seenPowered = false;
-    for (int i = 0; i < fastEnd; i++) {
+    for (int i = fastStart; i < fastEnd; i++) {
       final mg = (samples[i].accelMagG * 1000).round();
       if (!seenPowered) {
         if (mg >= burnoutThreshMg) seenPowered = true;
@@ -63,7 +71,7 @@ class FlightStats {
     // if burnout wasn't detected.
     final boostEnd = burnoutIdx > 0 ? burnoutIdx : fastEnd;
     double maxAccelG = 0;
-    for (int i = 0; i < boostEnd; i++) {
+    for (int i = fastStart; i < boostEnd; i++) {
       final g = samples[i].accelMagG;
       if (g > maxAccelG) maxAccelG = g;
     }
@@ -85,7 +93,7 @@ class FlightStats {
     int timeRecoveryMs = 0;
     const windowSize = 5;
     const pressureTol = 1500;
-    final slowStart = min(data.metadata.fastCount, samples.length);
+    final slowStart = fastEnd;
     if (samples.length >= slowStart + windowSize) {
       outer:
       for (int i = slowStart; i <= samples.length - windowSize; i++) {
@@ -102,17 +110,27 @@ class FlightStats {
       }
     }
 
+    // Shift all reported times from firmware-t0-relative to true-ignition-
+    // relative (see FlightData.ignitionOffsetMs). 0 is a "not detected"
+    // sentinel for burnout/recovery only (see stats_widget.dart's _ms()) and
+    // must be left alone rather than shifted into a false detected time;
+    // flightTime/apogee are always real values, so shift unconditionally.
+    final ignitionOffsetMs = data.ignitionOffsetMs;
+    int shiftMs(int ms) => ms - ignitionOffsetMs;
+    int shiftDetectedMs(int ms) => ms == 0 ? 0 : shiftMs(ms);
+
     return FlightStats(
-      flightTimeMs: samples.last.timeMs,
+      flightTimeMs: shiftMs(samples.last.timeMs),
       maxAccelMg: (maxAccelG * 1000).round(),
       minRawPress: samples[apogeeIdx].rawPress,
-      timeBurnoutMs: timeBurnoutMs,
-      timeApogeeMs: samples[apogeeIdx].timeMs,
-      timeRecoveryMs: timeRecoveryMs,
+      timeBurnoutMs: shiftDetectedMs(timeBurnoutMs),
+      timeApogeeMs: shiftMs(samples[apogeeIdx].timeMs),
+      timeRecoveryMs: shiftDetectedMs(timeRecoveryMs),
       groundRawPress: groundRawPress,
       groundRawTemp: data.metadata.groundRawTemp,
       maxAltM: maxAltM,
       baroType: data.metadata.baroType,
+      ignitionOffsetMs: ignitionOffsetMs,
     );
   }
 }

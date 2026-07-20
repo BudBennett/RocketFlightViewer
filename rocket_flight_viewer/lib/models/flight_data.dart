@@ -64,4 +64,36 @@ class FlightData {
     if (metadata.groundRawPress != 0) return metadata.groundRawPress;
     return samples.isNotEmpty ? samples.first.rawPress : 0;
   }
+
+  // True ignition offset, in ms relative to the firmware's launch-confirm
+  // instant (t=0) — always <= 0. The firmware declares t=0 once accel has
+  // been above threshold for launch_confirm_samples consecutive samples,
+  // which lags the real onset of motion; real ignition is found by scanning
+  // the pre-launch buffer forward with a two-threshold (hysteresis) rule:
+  // a candidate is (re)armed only on crossing _restingAccelMagGMax (clearly
+  // above resting noise, so a flat/quiet buffer never picks an arbitrary
+  // early point), then reset if it later dips back below 1g/unity (real
+  // sustained thrust shouldn't crash back to bare gravity). The last
+  // candidate standing at t=0 is true ignition. Falls back to 0 (no
+  // adjustment) if no candidate survives, e.g. a flat pre-launch buffer with
+  // no detectable disturbance.
+  int get ignitionOffsetMs {
+    final preLaunchCount = metadata.preLaunchCount < samples.length
+        ? metadata.preLaunchCount
+        : samples.length;
+    int? candidateMs;
+    for (int i = 0; i < preLaunchCount; i++) {
+      final g = samples[i].accelMagG;
+      if (g < 1.0) {
+        candidateMs = null;
+      } else if (candidateMs == null && g >= _restingAccelMagGMax) {
+        candidateMs = samples[i].timeMs;
+      }
+    }
+    return candidateMs ?? 0;
+  }
+
+  // Sample time, in seconds, relative to true ignition rather than the
+  // firmware's t=0 — see ignitionOffsetMs.
+  double shiftedTimeSec(FlightSample s) => (s.timeMs - ignitionOffsetMs) / 1000.0;
 }

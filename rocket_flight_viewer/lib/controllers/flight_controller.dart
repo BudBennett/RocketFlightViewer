@@ -415,6 +415,14 @@ class FlightController extends ChangeNotifier {
     // FlightData.groundRawPress. Written so a spreadsheet can reproduce the
     // altitude_m column exactly, without redoing that averaging/filtering.
     sb.writeln('# launch_raw_press=$groundRawPress');
+    // Marks the app's estimate of true ignition, in ms relative to t=0 above
+    // (t=0 is the firmware's launch-confirm instant, which lags real ignition
+    // — see FlightData.ignitionOffsetMs). Informational only: time_s in the
+    // rows below is NOT shifted by this value, so the app can always
+    // recompute the estimate fresh from the raw pre-launch samples rather
+    // than trusting a stored one. Stats/chart displays subtract this from
+    // time_s to align on true ignition.
+    sb.writeln('# ignition_offset_ms=${data.ignitionOffsetMs}');
     final pic = _picStats;
     if (pic != null) {
       // Apply ODR correction to fast-phase apogee time; landing is slow-phase (timer-driven) so no correction needed.

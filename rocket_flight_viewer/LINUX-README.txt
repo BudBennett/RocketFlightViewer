@@ -34,13 +34,14 @@ depends on the lib/ and data/ folders alongside it.
 
 Connecting the payload
 -----------------------
-Connect via USB using a CP2102N USB-to-serial adapter. The device will
-appear as /dev/ttyUSB0 (or similar). Select it from the port dropdown
+Connect via a USB-C cable directly to the payload's v2 PCB (onboard
+MCP2221A USB-serial chip, no external adapter needed). The device will
+appear as /dev/ttyACM0 (or similar). Select it from the port dropdown
 in the app.
 
 Troubleshooting
 ---------------
 - No ports listed: confirm dialout group membership (groups $USER) and
-  that the USB adapter is plugged in.
-- Permission denied on /dev/ttyUSB0: the dialout group change has not
+  that the payload is plugged in.
+- Permission denied on /dev/ttyACM0: the dialout group change has not
   taken effect yet — reboot and try again.
