@@ -72,6 +72,13 @@ class FlightController extends ChangeNotifier {
 
   int? productType;         // 2=STANDARD, 3=PRO; null=unknown
   int baroType = 1;         // 1=LPS22HB, 2=BMP581; defaults to LPS22HB until connected
+
+  // True after a successful sleepForCharging() 'Z' command: the PIC is asleep
+  // (~22µA) with USB still connected for charging. It only wakes on a real
+  // unplug/replug (or the physical arm-magnet gesture) — there is no app
+  // command that can wake it, so the existing port-unplugged/reconnect flow
+  // is what recovers from this state, not a dedicated "Reconnect" button.
+  bool payloadSleeping = false;
   bool get hasStorage => productType == 2 || productType == 3;
   bool get isPro => productType == 3;
 
@@ -144,6 +151,7 @@ class FlightController extends ChangeNotifier {
     flightStats = null;
     _picStats = null;
     downloadProgress = 0.0;
+    payloadSleeping = false;
     notifyListeners();
   }
 
@@ -165,6 +173,7 @@ class FlightController extends ChangeNotifier {
       flightSlots = [];
       nextSlot = null;
       selectedSlot = 0;
+      payloadSleeping = false;
       status = AppStatus.connected;
       statusMessage = 'Connected to $selectedPort';
       _fetchOnConnect();
@@ -268,6 +277,7 @@ class FlightController extends ChangeNotifier {
     flightStats = null;
     _picStats = null;
     downloadProgress = 0.0;
+    payloadSleeping = false;
     notifyListeners();
   }
 
@@ -666,6 +676,29 @@ class FlightController extends ChangeNotifier {
       _done('Storage erased');
     } else {
       _error('Erase failed');
+    }
+  }
+
+  /// Puts the PIC to sleep (~22µA) while USB stays connected for charging.
+  /// The device will not respond to anything until it wakes on a real
+  /// unplug/replug of the USB cable, or a hall-effect arm gesture on the
+  /// payload itself — there is no app command that can wake it (see
+  /// CLAUDE.md, "Reconnect now broken" / its 2026-08-03 resolution). Stops
+  /// the battery poll timer so it doesn't spend 2s per attempt waiting on a
+  /// payload that has gone deliberately silent.
+  Future<void> sleepForCharging() async {
+    if (liveActive) stopLive();
+    _busy('Putting payload to sleep…');
+    final ok = await _payload.sleepForCharging();
+    if (ok) {
+      _batteryTimer?.cancel();
+      _batteryTimer = null;
+      payloadSleeping = true;
+      status = AppStatus.connected;
+      statusMessage = 'Payload sleeping (charging) — unplug/replug to resume';
+      notifyListeners();
+    } else {
+      _error('Sleep command failed');
     }
   }
 

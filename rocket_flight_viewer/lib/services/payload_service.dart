@@ -217,6 +217,18 @@ class PayloadService {
     return data[0] | (data[1] << 8); // 10-bit ADC counts, little-endian
   }
 
+  // Puts the PIC to sleep (~22µA) while USB stays connected for charging.
+  // The firmware acks with 'A' before sleeping, then goes silent — it will
+  // not respond to anything else until it wakes on a hall-effect edge (arm
+  // gesture) or on the next command sent after a normal reconnect. Callers
+  // must not treat that silence as a disconnect/error.
+  Future<bool> sleepForCharging() async {
+    _serial.flushRx();
+    if (!_serial.sendBytes([0x5A])) return false; // 'Z'
+    final data = await _serial.readBytes(1, timeoutMs: 2000);
+    return data != null && data[0] == 0x41; // 'A'
+  }
+
   Future<LiveSample?> getLiveSample() async {
     _serial.flushRx();
     if (!_serial.sendBytes([0x4C])) return null; // 'L'

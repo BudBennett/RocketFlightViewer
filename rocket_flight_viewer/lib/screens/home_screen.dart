@@ -138,6 +138,14 @@ class _FlightDataTabState extends State<_FlightDataTab> {
       );
     }
 
+    if (ctrl.payloadSleeping) {
+      return const Center(
+        child: Text(
+          'Payload sleeping — charging. Unplug and replug USB to resume.',
+        ),
+      );
+    }
+
     if (ctrl.isBusy) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -250,6 +258,20 @@ class _FlightDataActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final disableNonLive = ctrl.isBusy || ctrl.liveActive;
+
+    if (ctrl.payloadSleeping) {
+      // No app-side "Reconnect" anymore — the firmware only wakes on a real
+      // unplug/replug (or the physical arm-magnet gesture), so there is
+      // nothing left for a button here to do.
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Text(
+          'Unplug and replug USB to resume.',
+          style: TextStyle(fontStyle: FontStyle.italic),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Wrap(
@@ -299,6 +321,12 @@ class _FlightDataActionRow extends StatelessWidget {
                 ctrl.startLive();
               }
             },
+          ),
+          _ActionButton(
+            label: 'Sleep (Charging)',
+            icon: Icons.bedtime_outlined,
+            busy: disableNonLive,
+            onPressed: () => ctrl.sleepForCharging(),
           ),
         ],
       ),
@@ -415,20 +443,32 @@ class _ConnectionBarState extends State<_ConnectionBar> {
           ),
           const SizedBox(width: 12),
           ElevatedButton(
-            onPressed: ctrl.isBusy
+            // While asleep, neither Disconnect nor Connect can do anything
+            // useful: the PIC only wakes on a real unplug/replug, which the
+            // app already detects on its own (onDisconnect fires when the
+            // COM port itself disappears) and resets payloadSleeping then.
+            // Closing our own handle here and reopening it would just hand
+            // back a "connected" port the sleeping PIC never answers,
+            // reproducing the confusing read-failed reconnect this button
+            // is disabled to prevent.
+            onPressed: ctrl.isBusy || ctrl.payloadSleeping
                 ? null
                 : ctrl.isConnected
                     ? ctrl.disconnect
                     : () => ctrl.connect(),
             style: ElevatedButton.styleFrom(
-              backgroundColor: ctrl.isBusy
+              backgroundColor: ctrl.isBusy || ctrl.payloadSleeping
                   ? null
                   : ctrl.isConnected
                       ? Colors.red[700]
                       : Colors.green[700],
-              foregroundColor: ctrl.isBusy ? null : Colors.white,
+              foregroundColor: ctrl.isBusy || ctrl.payloadSleeping ? null : Colors.white,
             ),
-            child: Text(ctrl.isConnected ? 'Disconnect' : 'Connect'),
+            child: Text(ctrl.payloadSleeping
+                ? 'Sleeping…'
+                : ctrl.isConnected
+                    ? 'Disconnect'
+                    : 'Connect'),
           ),
         ],
       ),
@@ -448,13 +488,19 @@ class _StatusBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Container(
+      // payloadSleeping is checked ahead of isConnected — the status bar
+      // otherwise looks identical to a normal connected/ready payload, which
+      // is exactly the confusing state that led the user to try Disconnect/
+      // Connect and hit a read-failed reconnect.
       color: ctrl.isError
           ? Colors.orange.withOpacity(0.35)
           : ctrl.isBusy
               ? cs.secondaryContainer.withOpacity(0.4)
-              : ctrl.isConnected
-                  ? cs.primaryContainer.withOpacity(0.4)
-                  : cs.surfaceContainerHighest.withOpacity(0.4),
+              : ctrl.payloadSleeping
+                  ? Colors.indigo.withOpacity(0.35)
+                  : ctrl.isConnected
+                      ? cs.primaryContainer.withOpacity(0.4)
+                      : cs.surfaceContainerHighest.withOpacity(0.4),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
         children: [
@@ -463,17 +509,21 @@ class _StatusBar extends StatelessWidget {
                 ? Icons.cancel
                 : ctrl.isBusy
                     ? Icons.hourglass_top
-                    : ctrl.isConnected
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
+                    : ctrl.payloadSleeping
+                        ? Icons.bedtime
+                        : ctrl.isConnected
+                            ? Icons.check_circle
+                            : Icons.radio_button_unchecked,
             size: 14,
             color: ctrl.isError
                 ? Colors.red[400]
                 : ctrl.isBusy
                     ? cs.secondary
-                    : ctrl.isConnected
-                        ? Colors.green[400]
-                        : cs.outline,
+                    : ctrl.payloadSleeping
+                        ? Colors.indigo[300]
+                        : ctrl.isConnected
+                            ? Colors.green[400]
+                            : cs.outline,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -487,7 +537,7 @@ class _StatusBar extends StatelessWidget {
             const SizedBox(width: 8),
             _ProductChip(productType: ctrl.productType!),
           ],
-          if (ctrl.batteryVoltage != null) ...[
+          if (ctrl.batteryVoltage != null && !ctrl.payloadSleeping) ...[
             const SizedBox(width: 8),
             _BatteryChip(voltage: ctrl.batteryVoltage!),
           ],
